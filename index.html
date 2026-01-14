@@ -3,58 +3,595 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>智配工 PRO - 修正穩定版</title>
+    <title>智配工 PRO - 全方位派工管理系統</title>
     
-    <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
-    <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+    <!-- 1. 核心載入：嚴格遵守順序 (React -> ReactDOM -> Babel -> Tailwind) -->
+    <script src="https://unpkg.com/react@18.2.0/umd/react.production.min.js"></script>
+    <script src="https://unpkg.com/react-dom@18.2.0/umd/react-dom.production.min.js"></script>
+    
+    <!-- 強制橋接全域變數，這是解決 forwardRef 錯誤的關鍵 -->
+    <script>
+        window.React = window.React || React;
+        window.ReactDOM = window.ReactDOM || ReactDOM;
+    </script>
+
     <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
     <script src="https://cdn.tailwindcss.com"></script>
     
-    <script src="https://unpkg.com/lucide@0.344.0/dist/umd/lucide.min.js"></script>
+    <!-- 2. Lucide React UMD：選用與 React 18 相容性最穩定的版本 -->
     <script src="https://unpkg.com/lucide-react@0.344.0/dist/umd/lucide-react.min.js"></script>
 
     <style>
         @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;500;700;900&display=swap');
-        body { font-family: 'Noto Sans TC', sans-serif; margin: 0; background-color: #F8FAFC; }
+        body { font-family: 'Noto Sans TC', sans-serif; margin: 0; padding: 0; background-color: #F8FAFC; }
+        .custom-scrollbar::-webkit-scrollbar { width: 6px; }
+        .custom-scrollbar::-webkit-scrollbar-track { background: transparent; }
+        .custom-scrollbar::-webkit-scrollbar-thumb { background: #E2E8F0; border-radius: 10px; }
         #root { min-height: 100vh; }
+        @media print { .no-print { display: none; } }
+        
+        .animate-fade-in { animation: fadeIn 0.4s ease-out forwards; }
+        @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
+        
+        .animate-shake { animation: shake 0.5s cubic-bezier(.36,.07,.19,.97) both; }
+        @keyframes shake {
+            10%, 90% { transform: translate3d(-1px, 0, 0); }
+            20%, 80% { transform: translate3d(2px, 0, 0); }
+            30%, 50%, 70% { transform: translate3d(-4px, 0, 0); }
+            40%, 60% { transform: translate3d(4px, 0, 0); }
+        }
+        .loading-screen { display: flex; justify-content: center; align-items: center; height: 100vh; color: #64748b; font-weight: bold; }
     </style>
 </head>
 <body>
     <div id="root">
-        <div style="display:flex; justify-content:center; align-items:center; height:100vh; color:#64748b; font-weight:bold;">
-            系統正在初始化中，請稍候...
-        </div>
+        <div class="loading-screen">系統環境校準中，請稍候...</div>
     </div>
 
     <script type="text/babel">
-        // 確保從全域變數正確抓取 React 函式
-        const { useState, useEffect, useMemo, useRef } = React;
+        // --- 1. 核心數據與常數 (必須置頂，確保組件初始化時可用) ---
+        const INITIAL_SKILLS = ['冷氣', '水電', '裝修', '泥作', '油漆'];
         
-        // 修正 Lucide 圖示抓取邏輯
-        const Lucide = window.LucideReact;
+        const INITIAL_TASKS = [
+            { 
+                id: 'WO-2024001', address: '台北市信義區信義路五段1號', urgency: '緊急', duration: '2.5hr', rating: 4.8, skill: '冷氣', status: '已完成', region: '台北', assignedTo: '王大明', x: 25, y: 35,
+                reason: '客戶反應冷氣不冷且滴水', details: '請優先檢查排水盤與風輪清潔，必要時更換耗材。', 
+                receiveTime: '2024-01-14 09:15:22',
+                finishTime: '2024-01-14 11:45:10',
+                sitePhoto: 'https://images.unsplash.com/photo-1581094794329-c8112a89af12?q=80&w=400',
+                orderPhoto: 'https://images.unsplash.com/photo-1504148455328-c376907d081c?q=80&w=400'
+            },
+            { id: 'WO-2024002', address: '台中市西屯區台灣大道三段', urgency: '一般', duration: '1.5hr', rating: 4.5, skill: '水電', status: '待指派', region: '台中', assignedTo: null, x: 55, y: 50 },
+        ];
+
+        const INITIAL_ENGINEERS = [
+            { id: 'ENG-01', name: '王大明', password: '123', skills: ['冷氣', '水電'], load: '1/5', status: '在線' },
+            { id: 'ENG-02', name: '李小華', password: '123', skills: ['裝修'], load: '0/5', status: '在線' },
+        ];
+
+        // --- 2. React 基礎設定與圖示解構 ---
+        const { useState, useEffect, useMemo, useRef, Fragment } = React;
+        
+        // 從 window.LucideReact 正確獲取圖示組件 (UMD 導出通常是大寫)
+        const Lucide = window.LucideReact || {};
         const { 
-            LayoutDashboard, Map, Users, Settings, Bell, ChevronLeft, ChevronRight, 
-            ShieldCheck, Clock, CheckCircle2, Zap, UserPlus, LogOut, Eye, EyeOff, X, Download
+            LayoutDashboard, Map: MapIcon, Users, Settings, Bell, ChevronLeft, ChevronRight, 
+            Navigation, CheckCircle2, Camera, PenTool, MapPin, Clock, Star, X, UserPlus, 
+            Zap, ShieldCheck, Plus, Trash2, UserCheck, UserX, Calendar, ChevronDown, 
+            LogOut, Send, KeyRound, UserCircle2, Lock, Eye, EyeOff, Info, ClipboardList, AlertCircle, FileText, Image: ImageIcon, Search, Download, Check 
         } = Lucide;
 
-        // --- 您原本的 App 組件代碼開始 ---
-        function App() {
+        // 圖示渲染保護組件 (解決 Error #130)
+        const SafeIcon = ({ icon: IconComponent, size = 20, className = "" }) => {
+            if (!IconComponent) return <div style={{ width: size, height: size }} className="bg-slate-200 inline-block rounded-sm" />;
+            return <IconComponent size={size} className={className} />;
+        };
+
+        // --- 3. 工具函數 ---
+        const getNow = () => {
+            const d = new Date();
+            return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')} ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}:${String(d.getSeconds()).padStart(2, '0')}`;
+        };
+
+        const downloadImage = (base64Data, filename) => {
+            if (!base64Data) return;
+            const link = document.createElement('a');
+            link.href = base64Data;
+            link.download = filename;
+            document.body.appendChild(link);
+            link.click();
+            link.remove();
+        };
+
+        // --- 4. 子組件定義 (依序排列以避免引用錯誤) ---
+
+        const AdminLoginGate = ({ correctCreds, onLoginSuccess }) => {
+            const [form, setForm] = useState({ user: '', pass: '' });
+            const [error, setError] = useState(false);
             return (
-                <div className="p-10 text-center">
-                    <h1 className="text-3xl font-black text-blue-600 flex items-center justify-center gap-2">
-                        <LayoutDashboard /> 智配工 PRO 已成功啟動
-                    </h1>
-                    <p className="mt-4 text-slate-500 font-bold">如果您看到這行字，代表 GitHub Pages 已經正常運作！</p>
-                    <div className="mt-10 p-8 bg-white rounded-3xl shadow-xl border border-slate-100 max-w-md mx-auto">
-                        <p className="text-slate-400">管理端登入測試</p>
-                        <button className="mt-4 w-full py-4 bg-blue-600 text-white rounded-2xl font-black">開始使用</button>
+                <div className="flex items-center justify-center min-h-screen bg-[#0F172A] p-6 text-center">
+                    <div className="w-full max-w-md p-10 bg-white rounded-[40px] shadow-2xl animate-fade-in">
+                        <div className="flex justify-center mb-6">
+                            <div className="w-16 h-16 bg-blue-600 rounded-2xl flex items-center justify-center text-white shadow-xl shadow-blue-500/30">
+                                <SafeIcon icon={ShieldCheck} size={32} />
+                            </div>
+                        </div>
+                        <h2 className="text-2xl font-black text-slate-800 mb-2">調度管理系統中心</h2>
+                        <p className="text-slate-400 font-bold mb-10 text-sm">管理員身分驗證</p>
+                        <form onSubmit={(e) => { e.preventDefault(); if(form.user === correctCreds.user && form.pass === correctCreds.pass) onLoginSuccess(); else setError(true); }} className="space-y-4 text-left">
+                            <div className="space-y-1">
+                                <label className="text-xs font-black text-slate-400 uppercase ml-2 tracking-widest">帳號</label>
+                                <input required className="w-full bg-slate-50 border-2 border-transparent focus:border-blue-600 rounded-2xl px-6 py-4 font-bold outline-none transition-all shadow-inner" value={form.user} onChange={e => setForm({...form, user: e.target.value})} />
+                            </div>
+                            <div className="space-y-1">
+                                <label className="text-xs font-black text-slate-400 uppercase ml-2 tracking-widest">密碼</label>
+                                <input required type="password" className="w-full bg-slate-50 border-2 border-transparent focus:border-blue-600 rounded-2xl px-6 py-4 font-bold outline-none transition-all shadow-inner" value={form.pass} onChange={e => setForm({...form, pass: e.target.value})} />
+                            </div>
+                            {error && <p className="text-red-500 text-sm font-bold text-center animate-shake">帳號或密碼錯誤</p>}
+                            <button type="submit" className="w-full py-4 bg-blue-600 text-white rounded-2xl font-black shadow-lg hover:bg-blue-700 active:scale-95 transition-all mt-6">登入調度後台</button>
+                        </form>
                     </div>
                 </div>
             );
-        }
-        // --- 您原本的 App 組件代碼結束 ---
+        };
 
-        const root = ReactDOM.createRoot(document.getElementById('root'));
+        const Sidebar = ({ isOpen, toggle, activeTab, setActiveTab, onLogout }) => {
+            const menu = [
+                { id: 'dashboard', icon: LayoutDashboard, label: '儀表板' },
+                { id: 'monitor', icon: MapIcon, label: '衛星監控' },
+                { id: 'engineers', icon: Users, label: '工程師' },
+                { id: 'settings', icon: Settings, label: '系統設定' }
+            ];
+            return (
+                <aside className={`fixed left-0 top-0 h-screen bg-[#1E293B] text-slate-300 transition-all duration-300 z-40 ${isOpen ? 'w-64' : 'w-20'}`}>
+                    <div className="p-6 flex items-center justify-between">
+                        {isOpen && <h1 className="text-xl font-black text-white tracking-widest truncate uppercase">Dispatch Pro</h1>}
+                        <button onClick={toggle} className="p-2 hover:bg-slate-700 rounded-lg transition-colors">{isOpen ? <SafeIcon icon={ChevronLeft} /> : <SafeIcon icon={ChevronRight} />}</button>
+                    </div>
+                    <nav className="mt-4 px-4 space-y-2">
+                        {menu.map(item => (
+                            <button key={item.id} onClick={() => setActiveTab(item.id)} className={`w-full flex items-center p-3 rounded-xl transition-all ${activeTab === item.id ? 'bg-blue-600 text-white shadow-lg shadow-blue-900/40' : 'hover:bg-slate-700'} ${!isOpen && 'justify-center'}`}>
+                                <SafeIcon icon={item.icon} size={20} className="shrink-0" />
+                                {isOpen && <span className="ml-4 font-bold">{item.label}</span>}
+                            </button>
+                        ))}
+                        <button onClick={onLogout} className={`w-full flex items-center p-3 rounded-xl mt-10 hover:bg-red-500/10 text-red-400 ${!isOpen && 'justify-center'}`}>
+                            <SafeIcon icon={LogOut} size={20} />
+                            {isOpen && <span className="ml-4 font-bold">登出系統</span>}
+                        </button>
+                    </nav>
+                </aside>
+            );
+        };
+
+        const AdminHeader = ({ activeTab, onAddClick }) => (
+            <header className="flex justify-between items-center mb-8 no-print text-left">
+                <div>
+                    <h2 className="text-3xl font-black text-slate-800 tracking-tight">{activeTab === 'settings' ? '系統配置設定' : '智配工管理後台'}</h2>
+                    <p className="text-slate-500 font-bold italic underline decoration-blue-500">
+                        <span className="inline-block w-2 h-2 bg-green-500 rounded-full animate-ping"></span>
+                        雲端伺服器連線正常
+                    </p>
+                </div>
+                <button onClick={onAddClick} className="flex items-center gap-2 bg-blue-600 text-white px-6 py-3 rounded-2xl font-black shadow-lg hover:bg-blue-700 transition-all active:scale-95">
+                    <SafeIcon icon={Plus} size={20} /> 新增工單
+                </button>
+            </header>
+        );
+
+        const TaskList = ({ tasks, onTaskClick }) => (
+            <div className="bg-white rounded-[32px] shadow-sm border border-slate-100 p-8 h-full flex flex-col text-left">
+                <h3 className="text-xl font-black mb-6 text-slate-800 tracking-tight">任務清單</h3>
+                <div className="space-y-4 overflow-y-auto flex-1 pr-2 custom-scrollbar">
+                    {tasks.map(task => (
+                        <div key={task.id} onClick={() => onTaskClick(task)} className={`p-5 rounded-3xl border-2 transition-all cursor-pointer ${task.status === '待指派' ? 'border-transparent hover:border-blue-500 bg-slate-50' : 'bg-white border-slate-100 opacity-80'}`}>
+                            <div className="flex justify-between items-center mb-2">
+                                <span className={`text-[10px] font-black px-2 py-1 rounded-lg ${task.urgency === '緊急' ? 'bg-red-500 text-white animate-pulse' : 'bg-slate-200'}`}>{task.urgency}</span>
+                                <span className={`text-[10px] font-black uppercase ${task.status === '已完成' ? 'text-emerald-600' : 'text-slate-400'}`}>{task.status}</span>
+                            </div>
+                            <h4 className="font-black text-slate-800 text-lg mb-1 truncate">{task.address}</h4>
+                            <div className="flex justify-between items-center mt-4">
+                                <span className="text-[10px] font-bold bg-blue-50 text-blue-600 px-3 py-1 rounded-full">{task.skill}</span>
+                                {task.status === '待指派' ? <SafeIcon icon={UserPlus} className="text-blue-600" /> : <SafeIcon icon={FileText} className="text-slate-400" />}
+                            </div>
+                        </div>
+                    ))}
+                </div>
+            </div>
+        );
+
+        const DispatchMonitor = ({ filteredTasks }) => (
+            <div className="bg-white rounded-[40px] shadow-sm border border-slate-100 p-8 h-full flex flex-col text-left">
+                <h3 className="text-xl font-black flex items-center gap-2 mb-8 tracking-tight"><SafeIcon icon={MapIcon} className="text-blue-600" /> 即時地理監控標記</h3>
+                <div className="flex-1 bg-[#1E293B] rounded-[32px] relative overflow-hidden flex items-center justify-center min-h-[400px] shadow-inner">
+                    <div className="absolute inset-0 opacity-10" style={{ backgroundImage: 'radial-gradient(#3B82F6 1.5px, transparent 0)', backgroundSize: '30px 30px' }}></div>
+                    {filteredTasks.map((t) => (
+                        <div key={t.id} className="absolute transition-all duration-700" style={{ top: `${t.y}%`, left: `${t.x}%` }}>
+                            <div className={`p-2 rounded-full shadow-lg ${t.status === '執行中' ? 'bg-blue-600 ring-4 ring-blue-100 animate-pulse' : t.status === '已完成' ? 'bg-emerald-500' : 'bg-amber-500'}`}>
+                                <SafeIcon icon={MapPin} className="text-white" size={16} />
+                            </div>
+                        </div>
+                    ))}
+                </div>
+            </div>
+        );
+
+        const TaskDetailModal = ({ task, engineers, onClose, onConfirm }) => {
+            const isReadOnly = task.status !== '待指派';
+            const isDone = task.status === '已完成';
+            const [assignInfo, setAssignInfo] = useState({ 
+                reason: task.reason || '', 
+                details: task.details || '', 
+                estCompletion: task.estCompletion || '' 
+            });
+
+            return (
+                <div className="fixed inset-0 z-[100] flex items-center justify-center p-4">
+                    <div className="absolute inset-0 bg-slate-900/60 backdrop-blur-sm" onClick={onClose}></div>
+                    <div className="relative bg-white w-full max-w-2xl rounded-[40px] shadow-2xl overflow-hidden flex flex-col max-h-[90vh] animate-fade-in text-left">
+                        <div className="p-10 overflow-y-auto custom-scrollbar">
+                            <div className="flex justify-between items-start mb-6">
+                                <div><h3 className="text-2xl font-black text-slate-800">工單全歷程報告</h3><p className="text-slate-400 font-bold text-sm uppercase">WO Num: {task.id}</p></div>
+                                <div className={`px-4 py-2 rounded-xl text-xs font-black uppercase tracking-widest ${isDone ? 'bg-emerald-100 text-emerald-600' : 'bg-blue-100 text-blue-600'}`}>{task.status}</div>
+                            </div>
+                            
+                            {isReadOnly && (
+                                <div className="mb-8 p-6 bg-slate-50 rounded-[32px] border border-slate-100 space-y-3">
+                                    <h4 className="text-xs font-black text-slate-400 uppercase flex items-center gap-2"><SafeIcon icon={Clock} size={14}/> 作業時間軸</h4>
+                                    <p className="text-sm font-bold text-slate-600">領工時間：{task.receiveTime || '尚未領取'}</p>
+                                    {isDone && <p className="text-sm font-bold text-emerald-600">完工結案：{task.finishTime}</p>}
+                                </div>
+                            )}
+
+                            {isDone && (
+                                <div className="mb-8 grid grid-cols-2 gap-4">
+                                    {[{p: task.sitePhoto, l: '現場拍照'}, {p: task.orderPhoto, l: '實體工單'}].map((item, i) => (
+                                        <div key={i} className="relative group rounded-3xl overflow-hidden border-2 border-slate-100 bg-slate-50 shadow-sm">
+                                            <img src={item.p} className="w-full h-40 object-cover" />
+                                            <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
+                                                <button onClick={() => downloadImage(item.p, `${item.l}_${task.id}.jpg`)} className="bg-white p-3 rounded-full text-blue-600 shadow-xl transition-transform hover:scale-110"><SafeIcon icon={Download}/></button>
+                                            </div>
+                                            <div className="absolute bottom-2 left-2 bg-white/80 backdrop-blur-md px-2 py-1 rounded text-[8px] font-black uppercase">{item.l}</div>
+                                        </div>
+                                    ))}
+                                </div>
+                            )}
+                            
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-8 text-left">
+                                <div className="space-y-4 text-left">
+                                    <label className="block text-xs font-black text-slate-400 uppercase ml-2 mb-[-12px]">派工原因說明</label>
+                                    <input readOnly={isReadOnly} className={`w-full px-5 py-3 bg-slate-50 rounded-xl font-bold border-2 border-transparent focus:border-blue-600 outline-none transition-all ${isReadOnly ? 'bg-slate-100 text-slate-500' : 'bg-slate-50'}`} value={assignInfo.reason} onChange={e => setAssignInfo({...assignInfo, reason: e.target.value})} placeholder="例如：水管漏水嚴重" />
+                                    <label className="block text-xs font-black text-slate-400 uppercase ml-2 mb-[-12px]">預估完成</label>
+                                    <input type={isReadOnly ? "text" : "time"} readOnly={isReadOnly} className={`w-full px-5 py-3 bg-slate-50 rounded-xl font-bold border-2 border-transparent focus:border-blue-600 outline-none transition-all ${isReadOnly ? 'bg-slate-100' : 'bg-slate-50'}`} value={assignInfo.estCompletion} onChange={e => setAssignInfo({...assignInfo, estCompletion: e.target.value})} />
+                                </div>
+                                <div className="space-y-4 text-left">
+                                    <label className="block text-xs font-black text-slate-400 uppercase ml-2 mb-[-12px]">作業細節導引</label>
+                                    <textarea readOnly={isReadOnly} className={`w-full h-[124px] px-5 py-3 bg-slate-50 rounded-xl font-bold border-2 border-transparent focus:border-blue-600 outline-none resize-none transition-all ${isReadOnly ? 'bg-slate-100 text-slate-600' : 'bg-slate-50'}`} value={assignInfo.details} onChange={e => setAssignInfo({...assignInfo, details: e.target.value})} placeholder="指示施工細節..." />
+                                </div>
+                            </div>
+
+                            <div className="space-y-3">
+                                {!isReadOnly ? (
+                                    <Fragment>
+                                        <label className="block text-xs font-black text-slate-400 uppercase tracking-widest mb-2">指派專業負責工程師</label>
+                                        {engineers.filter(e => e.skills.includes(task.skill)).map(e => (
+                                            <button key={e.id} onClick={() => onConfirm(e.name, assignInfo)} className="w-full flex items-center justify-between p-5 rounded-2xl border-2 border-slate-100 hover:border-blue-600 hover:bg-blue-50 transition-all font-bold group">
+                                                <div className="flex items-center gap-4 text-left">
+                                                    <div className="w-10 h-10 bg-slate-100 rounded-xl flex items-center justify-center font-black text-blue-600 group-hover:bg-blue-600 group-hover:text-white transition-all">{e.name[0]}</div>
+                                                    <div className="text-left"><p className="text-slate-800 font-bold">{e.name}</p><p className="text-[10px] text-slate-400 font-black uppercase">Load: {e.load}</p></div>
+                                                </div>
+                                                <SafeIcon icon={ChevronRight} className="text-slate-300 group-hover:text-blue-600 group-hover:translate-x-1 transition-transform" />
+                                            </button>
+                                        ))}
+                                    </Fragment>
+                                ) : (
+                                    <div className="p-5 bg-blue-50 rounded-2xl border border-blue-100 font-black text-blue-800 flex items-center gap-3"><SafeIcon icon={UserCheck}/> 負責人員：{task.assignedTo || '未知'}</div>
+                                )}
+                            </div>
+                        </div>
+                        <button onClick={onClose} className="p-4 bg-slate-50 border-t font-black uppercase text-slate-400 hover:text-blue-600 transition-colors">關閉視窗</button>
+                    </div>
+                </div>
+            );
+        };
+
+        const AddTaskModal = ({ skills, onClose, onSubmit }) => {
+            const [f, setF] = useState({ address: '', region: '台北', skill: skills[0] || '冷氣', urgency: '一般' });
+            return (
+                <div className="fixed inset-0 z-[100] flex items-center justify-center p-4">
+                    <div className="absolute inset-0 bg-slate-900/60 backdrop-blur-sm" onClick={onClose}></div>
+                    <form onSubmit={(e) => { e.preventDefault(); onSubmit(f); }} className="relative bg-white w-full max-w-lg rounded-[40px] shadow-2xl p-10 space-y-6 animate-fade-in text-left">
+                        <div className="flex justify-between items-center mb-4 text-left">
+                            <h3 className="text-2xl font-black text-slate-800 tracking-tight">建立全新工單</h3>
+                            <button type="button" onClick={onClose} className="p-2 hover:bg-slate-100 rounded-full transition"><SafeIcon icon={X} size={24}/></button>
+                        </div>
+                        <div className="space-y-4">
+                            <input required autoFocus className="w-full bg-slate-50 border-2 border-transparent focus:border-blue-600 rounded-2xl px-6 py-4 font-bold outline-none shadow-inner" placeholder="請輸入服務地址" value={f.address} onChange={e => setF({...f, address: e.target.value})} />
+                            <div className="grid grid-cols-2 gap-4 text-left">
+                                <select className="w-full bg-slate-50 p-4 rounded-xl border-2 border-transparent focus:border-blue-600 font-bold outline-none" value={f.region} onChange={e => setF({...f, region: e.target.value})}><option value="台北">台北</option><option value="台中">台中</option><option value="高雄">高雄</option></select>
+                                <select className="w-full bg-slate-50 p-4 rounded-xl border-2 border-transparent focus:border-blue-600 font-bold outline-none" value={f.skill} onChange={e => setF({...f, skill: e.target.value})}>{skills.map(s => <option key={s} value={s}>{s}</option>)}</select>
+                            </div>
+                        </div>
+                        <button type="submit" className="w-full py-5 bg-blue-600 text-white rounded-3xl font-black text-lg shadow-xl shadow-blue-100 hover:bg-blue-700 transition-all active:scale-95">確認建立工單</button>
+                    </form>
+                </div>
+            );
+        };
+
+        const SettingsView = ({ skills, setSkills, engineers, setEngineers, adminCreds, setAdminCreds }) => {
+            const [newSkill, setNewSkill] = useState('');
+            const [newEng, setNewEng] = useState({ name: '', password: '', selectedSkills: [] });
+            const [showPass, setShowPass] = useState(false);
+            const handleAddSkill = () => { if (newSkill && !skills.includes(newSkill)) { setSkills([...skills, newSkill]); setNewSkill(''); } };
+            const handleCreateEngineer = () => {
+                if (newEng.name && newEng.password && newEng.selectedSkills.length > 0) {
+                    setEngineers([...engineers, { id: `ENG-${Date.now()}`, name: newEng.name, password: newEng.password, skills: newEng.selectedSkills, load: '0/5', status: '在線' }]);
+                    setNewEng({ name: '', password: '', selectedSkills: [] });
+                }
+            };
+            return (
+                <div className="space-y-8 animate-fade-in text-left">
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-8 text-left">
+                        <div className="bg-white rounded-[40px] p-10 border border-slate-100 shadow-sm space-y-4">
+                            <h3 className="text-xl font-black flex items-center gap-2 text-red-600 font-black"><SafeIcon icon={ShieldCheck} /> 帳戶安全憑證</h3>
+                            <input className="w-full bg-slate-50 p-4 rounded-xl border-2 border-transparent focus:border-blue-600 outline-none font-bold" value={adminCreds.user} onChange={e => setAdminCreds({...adminCreds, user: e.target.value})} placeholder="帳號" />
+                            <div className="relative">
+                                <input type={showPass ? "text" : "password"} className="w-full bg-slate-50 p-4 rounded-xl border-2 border-transparent focus:border-blue-600 outline-none font-bold" value={adminCreds.pass} onChange={e => setAdminCreds({...adminCreds, pass: e.target.value})} placeholder="密碼" />
+                                <button onClick={() => setShowPass(!showPass)} className="absolute right-4 top-4 text-slate-400 transition-colors hover:text-blue-600">{showPass ? <SafeIcon icon={EyeOff}/> : <SafeIcon icon={Eye}/>}</button>
+                            </div>
+                        </div>
+                        <div className="bg-white rounded-[40px] p-10 border border-slate-100 shadow-sm text-left">
+                            <h3 className="text-xl font-black mb-4 flex items-center gap-2 text-blue-600 font-black"><SafeIcon icon={Zap} /> 技能標籤庫</h3>
+                            <div className="flex gap-2 mb-4">
+                                <input className="flex-1 bg-slate-50 p-4 rounded-xl border-2 border-transparent focus:border-blue-600 outline-none font-bold shadow-sm" value={newSkill} onChange={e => setNewSkill(e.target.value)} placeholder="新技能" />
+                                <button onClick={handleAddSkill} className="bg-blue-600 text-white px-5 rounded-xl font-black shadow-lg">新增</button>
+                            </div>
+                            <div className="flex flex-wrap gap-2">{skills.map(s => <div key={s} className="bg-slate-50 px-3 py-1.5 rounded-lg text-sm font-bold border border-slate-100 flex items-center gap-2 shadow-sm transition-all hover:bg-slate-100">{s}<SafeIcon icon={X} size={14} className="cursor-pointer hover:text-red-500" onClick={() => setSkills(skills.filter(i => i !== s))} /></div>)}</div>
+                        </div>
+                    </div>
+                    <div className="bg-white rounded-[40px] p-10 border border-slate-100 shadow-sm text-left">
+                        <h3 className="text-xl font-black mb-6 flex items-center gap-2 text-indigo-600 font-black"><SafeIcon icon={UserPlus} /> 註冊新工程師人員</h3>
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-8 text-left">
+                            <div className="space-y-4">
+                                <input className="w-full bg-slate-50 p-4 rounded-xl outline-none font-bold border-2 border-transparent focus:border-blue-600 shadow-inner" placeholder="人員姓名" value={newEng.name} onChange={e => setNewEng({...newEng, name: e.target.value})} />
+                                <input className="w-full bg-slate-50 p-4 rounded-xl outline-none font-bold border-2 border-transparent focus:border-blue-600 shadow-inner" placeholder="登入密碼" value={newEng.password} onChange={e => setNewEng({...newEng, password: e.target.value})} />
+                            </div>
+                            <div className="space-y-4">
+                                <div className="flex flex-wrap gap-2">{skills.map(s => <button key={s} onClick={() => setNewEng(p => ({...p, selectedSkills: p.selectedSkills.includes(s) ? p.selectedSkills.filter(i => i !== s) : [...p.selectedSkills, s]}))} className={`px-4 py-2 rounded-xl font-bold transition-all ${newEng.selectedSkills.includes(s) ? 'bg-blue-600 text-white shadow-md' : 'bg-slate-50 hover:bg-slate-200'}`}>{s}</button>)}</div>
+                                <button onClick={handleCreateEngineer} className="w-full py-4 bg-blue-600 text-white rounded-2xl font-black shadow-lg hover:bg-blue-700 transition-all active:scale-[0.98]">建立帳戶並正式入職</button>
+                            </div>
+                        </div>
+                    </div>
+                    <div className="bg-white rounded-[40px] p-10 border border-slate-100 shadow-sm text-left">
+                        <h3 className="text-xl font-black mb-8 flex items-center gap-2 tracking-tight text-slate-800"><SafeIcon icon={Users} /> 工程師權限清冊管理</h3>
+                        <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+                           {engineers.map(eng => (
+                             <div key={eng.id} className="p-5 bg-slate-50 rounded-3xl border border-slate-100 relative group transition-all hover:bg-white hover:shadow-xl text-left shadow-sm">
+                                <p className="font-black text-slate-800 text-lg">{eng.name}</p>
+                                <p className="text-xs font-bold text-blue-600 mt-1 uppercase font-black">密碼：{eng.password}</p>
+                                <button onClick={() => setEngineers(engineers.filter(e => e.id !== eng.id))} className="absolute top-4 right-4 text-slate-300 hover:text-red-500 opacity-0 group-hover:opacity-100 transition-all"><SafeIcon icon={UserX} size={18}/></button>
+                             </div>
+                           ))}
+                        </div>
+                    </div>
+                </div>
+            );
+        };
+
+        const MobileWorkerApp = ({ tasks, isAuth, engineer, onLogin, onLogout, onUpdateTask }) => {
+            const [activeView, setActiveView] = useState('home');
+            const [selectedTask, setSelectedTask] = useState(null);
+            const [step, setStep] = useState(0); 
+            const [creds, setCreds] = useState({ name: '', pass: '' });
+            const [loginError, setLoginError] = useState(false);
+            const [localPhotos, setLocalPhotos] = useState({ site: null, order: null });
+
+            const myTasks = useMemo(() => engineer ? tasks.filter(t => t.assignedTo === engineer.name) : [], [tasks, engineer]);
+
+            const handleLogin = (e) => {
+                e.preventDefault();
+                if (!onLogin(creds.name, creds.pass)) { setLoginError(true); }
+            };
+
+            const handlePhotoAction = (type) => {
+                setLocalPhotos(prev => ({ ...prev, [type]: 'https://images.unsplash.com/photo-1581094271901-8022df4466f9?q=80&w=400' }));
+            };
+
+            const handleFinalComplete = () => {
+                onUpdateTask(selectedTask.id, { finishTime: getNow(), status: '已完成', sitePhoto: localPhotos.site, orderPhoto: localPhotos.order });
+                setActiveView('home');
+                setLocalPhotos({ site: null, order: null });
+            };
+
+            if (!isAuth) {
+                return (
+                    <div className="max-w-md mx-auto bg-[#0F172A] min-h-screen flex flex-col p-10 items-center justify-center">
+                        <SafeIcon icon={KeyRound} size={40} className="text-white mb-10 animate-bounce" />
+                        <form onSubmit={handleLogin} className="w-full space-y-4">
+                            <h2 className="text-2xl font-black text-white mb-8 tracking-tight text-center">工程師作業終端入口</h2>
+                            <input required className="w-full bg-slate-800 p-5 rounded-2xl text-white outline-none font-bold border-2 border-transparent focus:border-blue-600 transition-all shadow-inner" placeholder="請輸入姓名" value={creds.name} onChange={e => setCreds({...creds, name: e.target.value})} />
+                            <input required type="password" className="w-full bg-slate-800 p-5 rounded-2xl text-white outline-none font-bold border-2 border-transparent focus:border-blue-600 transition-all shadow-inner" placeholder="請輸入密碼" value={creds.pass} onChange={e => setCreds({...creds, pass: e.target.value})} />
+                            {loginError && <p className="text-red-500 font-bold text-center">登入驗證失敗</p>}
+                            <button type="submit" className="w-full py-5 bg-blue-600 text-white rounded-3xl font-black shadow-xl mt-6 active:scale-95 transition-all">登入工作台</button>
+                        </form>
+                    </div>
+                );
+            }
+
+            return (
+                <div className="max-w-md mx-auto bg-slate-50 min-h-screen flex flex-col shadow-2xl relative overflow-hidden animate-fade-in text-left">
+                    <header className="bg-blue-600 p-6 pt-12 text-white rounded-b-[40px] shadow-lg flex justify-between items-center sticky top-0 z-20">
+                        <div className="flex items-center gap-3"><div className="w-10 h-10 bg-white/20 rounded-xl flex items-center justify-center font-black">{engineer.name[0]}</div><h3 className="font-black text-lg">{engineer.name}</h3></div>
+                        <button onClick={onLogout} className="bg-white/10 p-2.5 rounded-xl hover:bg-white/20 transition-all"><SafeIcon icon={LogOut} size={18} /></button>
+                    </header>
+                    <div className="flex-1 p-6 pb-24 overflow-y-auto">
+                        {activeView === 'home' ? (
+                            <div className="space-y-6">
+                                <h4 className="text-lg font-black flex items-center gap-2 text-slate-800"><SafeIcon icon={Calendar} className="text-blue-600" /> 作業行程</h4>
+                                {myTasks.map(task => (
+                                    <div key={task.id} onClick={() => { setSelectedTask(task); setActiveView('detail'); setStep(task.status === '已完成' ? 4 : (task.receiveTime ? 1 : 0)); }} className={`p-6 rounded-[32px] border-2 bg-white transition-all active:scale-95 text-left ${task.status === '已完成' ? 'grayscale opacity-60 border-slate-100 shadow-none' : 'shadow-xl shadow-slate-200/50'}`}>
+                                        <div className="flex justify-between items-start mb-2"><span className="text-[10px] font-black bg-slate-100 px-2 py-1 rounded-lg uppercase tracking-widest">{task.id}</span>{task.status === '已完成' && <SafeIcon icon={CheckCircle2} className="text-emerald-500" />}</div>
+                                        <h5 className="font-black text-slate-800 text-lg mb-2 leading-tight">{task.address}</h5>
+                                        {task.reason && <p className="text-xs font-bold text-red-500 bg-red-50 px-3 py-2 rounded-xl mb-4 flex items-center gap-2 tracking-tighter font-black"><SafeIcon icon={AlertCircle} size={14}/> {task.reason}</p>}
+                                        <div className="flex justify-between items-center pt-4 border-t border-slate-50 font-bold text-[10px] uppercase font-black"><span className="text-blue-600">{task.skill}</span><span className="text-slate-400">{task.status}</span></div>
+                                    </div>
+                                ))}
+                                {myTasks.length === 0 && <div className="text-center py-20 text-slate-400 font-bold italic border-2 border-dashed rounded-[40px] border-slate-200">暫無指派任務</div>}
+                            </div>
+                        ) : (
+                            <div className="space-y-8 animate-in slide-in-from-right-4 text-left">
+                                <div className="bg-white p-8 rounded-[40px] shadow-sm border border-slate-100 text-left relative overflow-hidden shadow-xl shadow-blue-900/5">
+                                    <h4 className="font-black text-xl text-blue-600 mb-6 flex items-center gap-2"><SafeIcon icon={ClipboardList} /> 作業詳情指引</h4>
+                                    <div className="space-y-4">
+                                        <div className="bg-slate-50 p-4 rounded-2xl text-left shadow-inner"><p className="text-[10px] font-black text-slate-400 uppercase mb-1 tracking-widest">派工原因</p><p className="text-sm font-black text-slate-800">{selectedTask.reason || '無'}</p></div>
+                                        <div className="bg-slate-50 p-4 rounded-2xl text-left shadow-inner"><p className="text-[10px] font-black text-slate-400 uppercase mb-1 tracking-widest">施工指引</p><p className="text-sm font-bold text-slate-600 leading-relaxed">{selectedTask.details || '請依標準程序處理'}</p></div>
+                                        <div className="bg-blue-50 p-4 rounded-2xl border border-blue-100 text-blue-600 font-black flex items-center gap-2"><SafeIcon icon={Clock} size={16}/> {selectedTask.estCompletion || '無時限'}</div>
+                                    </div>
+                                </div>
+                                {step === 0 && <button onClick={() => { onUpdateTask(selectedTask.id, { receiveTime: getNow(), status: '執行中' }); setStep(1); }} className="w-full py-5 bg-blue-600 text-white rounded-[28px] font-black shadow-lg shadow-blue-200 active:scale-95 transition-all">確認接單 · 開始領工紀錄</button>}
+                                {step === 1 && <button onClick={() => setStep(2)} className="w-full py-5 bg-slate-900 text-white rounded-[28px] font-black shadow-xl active:scale-95 transition-all">抵達現場 · 開啟影像拍照</button>}
+                                {step === 2 && (
+                                    <div className="space-y-6 text-left">
+                                        <h4 className="font-black text-lg text-slate-800 pl-4 uppercase flex items-center gap-2 tracking-tight font-black"><SafeIcon icon={Camera} className="text-blue-600" /> 完工影像存證 (必填)</h4>
+                                        <div className="grid grid-cols-2 gap-4">
+                                            <div onClick={() => handlePhotoAction('site')} className="aspect-square bg-white border-4 border-dashed rounded-[40px] flex flex-col items-center justify-center text-slate-300 font-black cursor-pointer overflow-hidden transition-all hover:border-blue-400 relative shadow-sm">
+                                                {localPhotos.site ? <img src={localPhotos.site} className="w-full h-full object-cover shadow-inner" /> : <Fragment><SafeIcon icon={Camera} size={32}/><span className="text-[10px] mt-1 uppercase font-black">現場拍照</span></Fragment>}
+                                            </div>
+                                            <div onClick={() => handlePhotoAction('order')} className="aspect-square bg-white border-4 border-dashed rounded-[40px] flex flex-col items-center justify-center text-slate-300 font-black cursor-pointer overflow-hidden transition-all hover:border-blue-400 relative shadow-sm">
+                                                {localPhotos.order ? <img src={localPhotos.order} className="w-full h-full object-cover shadow-inner" /> : <Fragment><SafeIcon icon={FileText} size={32}/><span className="text-[10px] mt-1 uppercase font-black">實體工單</span></Fragment>}
+                                            </div>
+                                        </div>
+                                        <button disabled={!localPhotos.site || !localPhotos.order} onClick={() => setStep(3)} className={`w-full py-5 rounded-[28px] font-black shadow-lg transition-all ${(!localPhotos.site || !localPhotos.order) ? 'bg-slate-200 text-slate-400 cursor-not-allowed' : 'bg-blue-600 text-white shadow-blue-200'}`}>影像核對完成</button>
+                                    </div>
+                                )}
+                                {step === 3 && <div className="space-y-6 text-center animate-fade-in"><div className="w-full h-56 bg-white rounded-[40px] border-2 border-slate-100 flex items-center justify-center text-slate-300 font-bold italic shadow-inner">請引導客戶於此數位簽名區</div><button onClick={handleFinalComplete} className="w-full py-5 bg-emerald-600 text-white rounded-[28px] font-black shadow-xl active:scale-95 transition-all">確認結案並上傳存檔</button></div>}
+                                {step === 4 && <div className="bg-emerald-50 p-10 rounded-[40px] text-center border border-emerald-100 animate-in zoom-in shadow-inner"><SafeIcon icon={CheckCircle2} size={48} className="mx-auto text-emerald-500 mb-4"/><h5 className="text-2xl font-black text-emerald-800 mb-2 tracking-tight">已同步結案存檔</h5><button onClick={() => setActiveView('home')} className="w-full py-4 bg-emerald-600 text-white rounded-2xl font-black mt-6 shadow-md transition-all active:scale-95">返回主清單</button></div>}
+                                <button onClick={() => setActiveView('home')} className="w-full py-4 text-slate-400 font-black uppercase text-xs hover:text-slate-600 transition-colors">返回</button>
+                            </div>
+                        )}
+                    </div>
+                </div>
+            );
+        };
+
+        // --- 5. 主 App 整合核心 ---
+
+        function App() {
+            const [view, setView] = useState('admin');
+            const [activeTab, setActiveTab] = useState('dashboard');
+            const [isSidebarOpen, setIsSidebarOpen] = useState(true);
+            const [tasks, setTasks] = useState(INITIAL_TASKS);
+            const [skills, setSkills] = useState(INITIAL_SKILLS);
+            const [engineers, setEngineers] = useState(INITIAL_ENGINEERS);
+            const [adminCreds, setAdminCreds] = useState({ user: 'admin', pass: 'admin123' });
+            const [isAdminAuth, setIsAdminAuth] = useState(false);
+            const [currentEngineer, setCurrentEngineer] = useState(null);
+            const [isEngAuthenticated, setIsEngAuthenticated] = useState(false);
+            const [statusFilter, setStatusFilter] = useState('全部');
+            const [selectedTask, setSelectedTask] = useState(null);
+            const [isAddModalOpen, setIsAddModalOpen] = useState(false);
+
+            const filteredTasks = useMemo(() => tasks.filter(t => (statusFilter === '全部' || t.status === statusFilter)), [tasks, statusFilter]);
+
+            const handleUpdateTask = (taskId, updates) => {
+                setTasks(prev => prev.map(t => t.id === taskId ? { ...t, ...updates } : t));
+            };
+
+            const handleAssignTask = (engName, info) => {
+                handleUpdateTask(selectedTask.id, { assignedTo: engName, status: '執行中', ...info });
+                setSelectedTask(null);
+            };
+
+            const handleAddTask = (formData) => {
+                const newTask = { ...formData, id: `WO-2024${String(tasks.length + 1).padStart(3, '0')}`, status: '待指派', assignedTo: null, x: 20 + Math.random()*60, y: 20 + Math.random()*60 };
+                setTasks([newTask, ...tasks]);
+                setIsAddModalOpen(false);
+            };
+
+            return (
+                <div className="min-h-screen">
+                    <div className="fixed bottom-6 right-6 z-50 flex flex-col gap-2 no-print">
+                        <button onClick={() => setView('admin')} className={`px-6 py-3 rounded-full shadow-2xl font-black transition-all active:scale-95 ${view === 'admin' ? 'bg-blue-600 text-white scale-110 shadow-blue-200' : 'bg-white text-blue-600 border border-blue-200 shadow-sm'}`}>💻 管理中心</button>
+                        <button onClick={() => setView('mobile')} className={`px-6 py-3 rounded-full shadow-2xl font-black transition-all active:scale-95 ${view === 'mobile' ? 'bg-blue-600 text-white scale-110 shadow-blue-200' : 'bg-white text-blue-600 border border-blue-200 shadow-sm'}`}>📱 工程終端</button>
+                    </div>
+
+                    {view === 'admin' ? (
+                        !isAdminAuth ? (
+                            <AdminLoginGate correctCreds={adminCreds} onLoginSuccess={() => setIsAdminAuth(true)} />
+                        ) : (
+                            <div className="flex animate-fade-in">
+                                <Sidebar isOpen={isSidebarOpen} toggle={() => setIsSidebarOpen(!isSidebarOpen)} activeTab={activeTab} setActiveTab={setActiveTab} onLogout={() => setIsAdminAuth(false)} />
+                                <main className={`flex-1 transition-all duration-300 ${isSidebarOpen ? 'ml-64' : 'ml-20'} p-8`}>
+                                    <AdminHeader activeTab={activeTab} onAddClick={() => setIsAddModalOpen(true)} />
+                                    
+                                    {activeTab === 'dashboard' && (
+                                        <div className="space-y-8 animate-fade-in text-left">
+                                            <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                                                {[
+                                                    { id: '全部', label: '今日總工單', value: tasks.length, icon: Zap, color: 'from-blue-600 to-blue-800' },
+                                                    { id: '待指派', label: '待指派量', value: tasks.filter(t => t.status === '待指派').length, icon: Clock, color: 'from-amber-500 to-orange-600' },
+                                                    { id: '已完成', label: '完工結案', value: tasks.filter(t => t.status === '已完成').length, icon: CheckCircle2, color: 'from-emerald-500 to-teal-600' }
+                                                ].map((stat) => (
+                                                    <button key={stat.id} onClick={() => setStatusFilter(stat.id)} className={`relative overflow-hidden rounded-[32px] p-8 text-left text-white shadow-xl transition-all hover:scale-[1.03] active:scale-95 ${statusFilter === stat.id ? 'ring-4 ring-offset-4 ring-blue-400' : 'opacity-90'} bg-gradient-to-br ${stat.color}`}>
+                                                        <SafeIcon icon={stat.icon} size={40} className="absolute top-0 right-0 p-8 opacity-10 scale-[2.5]" />
+                                                        <p className="text-white/80 text-xs font-black uppercase mb-1 tracking-widest">{stat.label}</p>
+                                                        <h3 className="text-4xl font-black">{stat.value}</h3>
+                                                    </button>
+                                                ))}
+                                            </div>
+                                            <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+                                                <div className="lg:col-span-1">
+                                                    <TaskList tasks={filteredTasks} onTaskClick={setSelectedTask} />
+                                                </div>
+                                                <div className="lg:col-span-2">
+                                                    <DispatchMonitor filteredTasks={filteredTasks} />
+                                                </div>
+                                            </div>
+                                        </div>
+                                    )}
+                                    
+                                    {activeTab === 'monitor' && <div className="h-[calc(100vh-180px)]"><DispatchMonitor filteredTasks={filteredTasks} /></div>}
+                                    
+                                    {activeTab === 'settings' && (
+                                        <SettingsView 
+                                            skills={skills} setSkills={setSkills} 
+                                            engineers={engineers} setEngineers={setEngineers} 
+                                            adminCreds={adminCreds} setAdminCreds={setAdminCreds} 
+                                        />
+                                    )}
+
+                                    {activeTab === 'engineers' && (
+                                        <div className="grid grid-cols-1 md:grid-cols-4 gap-6 animate-fade-in text-left">
+                                            {engineers.map(e => (
+                                                <div key={e.id} className="bg-white p-6 rounded-[32px] border border-slate-100 shadow-sm transition-all hover:shadow-xl group shadow-blue-900/5">
+                                                    <div className="w-12 h-12 bg-blue-50 rounded-2xl flex items-center justify-center mb-4 font-black text-blue-600 group-hover:bg-blue-600 group-hover:text-white transition-colors uppercase font-black">{e.name[0]}</div>
+                                                    <h4 className="font-black text-slate-800 text-lg mb-1">{e.name}</h4>
+                                                    <p className="text-xs text-blue-600 font-bold uppercase tracking-widest">{e.status}</p>
+                                                    <div className="flex flex-wrap gap-1 mt-3 font-black">{e.skills.map(s => <span key={s} className="text-[8px] bg-slate-100 px-1.5 py-0.5 rounded-md text-slate-500">{s}</span>)}</div>
+                                                </div>
+                                            ))}
+                                        </div>
+                                    )}
+                                </main>
+                                {selectedTask && <TaskDetailModal task={selectedTask} engineers={engineers} onClose={() => setSelectedTask(null)} onConfirm={handleAssignTask} />}
+                                {isAddModalOpen && <AddTaskModal skills={skills} onClose={() => setIsAddModalOpen(false)} onSubmit={handleAddTask} />}
+                            </div>
+                        )
+                    ) : (
+                        <MobileWorkerApp 
+                            tasks={tasks} isAuth={isEngAuthenticated} engineer={currentEngineer} 
+                            onLogin={(name, pass) => { const eng = engineers.find(e => e.name === name && e.password === pass); if (eng) { setCurrentEngineer(eng); setIsEngAuthenticated(true); return true; } return false; }}
+                            onLogout={() => { setCurrentEngineer(null); setIsEngAuthenticated(false); }}
+                            onUpdateTask={handleUpdateTask}
+                        />
+                    )}
+                </div>
+            );
+        }
+
+        // --- 6. 渲染啟動 ---
+        const rootContainer = document.getElementById('root');
+        const root = ReactDOM.createRoot(rootContainer);
         root.render(<App />);
     </script>
 </body>
